@@ -432,6 +432,7 @@ async def process_single_sequence(
     
     # Initialize web explorer interactions list
     seq['web_explorer'] = []
+    print("inside process_single_sequence-----")
     
     # First response uses chat completion
     formatted_prompt, response = await generate_response(
@@ -445,9 +446,11 @@ async def process_single_sequence(
         repetition_penalty=args.repetition_penalty,
         top_k=args.top_k_sampling,
         min_p=args.min_p,
-        stop=[END_SEARCH_QUERY],
+        stop=None,
     )
-    
+    print("after inside process_single_sequence-----")
+    print(response)
+    print("after response process_single_sequence-----")
     # Update token count and sequence fields
     tokens_this_response = len(response.split())
     total_tokens += tokens_this_response
@@ -456,21 +459,32 @@ async def process_single_sequence(
     seq['history'].append(response.replace('</think>\n', ''))
     seq['original_prompt'] = formatted_prompt
     seq['prompt'] = formatted_prompt + response.replace('</think>\n', '')
-    
+    print("response while print seq-----")
+    print(seq['finished'])
     while not seq['finished']:
         # Check if sequence is finished
-        if not seq['output'].rstrip().endswith(END_SEARCH_QUERY):
+        if seq['output'].rstrip().endswith(END_SEARCH_QUERY):
+            print("inside check seq value-----")
             seq['finished'] = True
             break
-        
+        print("before search query line-----")
         search_query = extract_between(response, BEGIN_SEARCH_QUERY, END_SEARCH_QUERY)
         seq['search_count'] += 1
 
         if seq['search_count'] < args.max_search_limit and total_tokens < MAX_TOKENS:
             if search_query is None or len(search_query) <= 5 or END_SEARCH_QUERY in search_query or search_query in invalid_search_queries: # 不合法的query
+                print("before continue-----")
+                print("\n[DEBUG] Checking search_query validity...")
+                print(f"search_query: {repr(search_query)}")
+                print(f"is None: {search_query is None}")
+                print(f"too short (<=5): {len(search_query) if search_query else 'N/A'} <= 5 -> {len(search_query) <= 5 if search_query else 'N/A'}")
+                print(f"contains END_SEARCH_QUERY: {END_SEARCH_QUERY in search_query if search_query else 'N/A'}")
+                print(f"in invalid_search_queries: {search_query in invalid_search_queries if search_query else 'N/A'}")
+
                 continue
 
             if search_query in seq['executed_search_queries']:
+                print("inside executed_search_queries-----")
                 # If search query was already executed, append message and continue
                 append_text = f"\n\n{BEGIN_SEARCH_RESULT}You have already searched for this query.{END_SEARCH_RESULT}\n\nOkay,"
                 seq['prompt'] += append_text
@@ -478,7 +492,7 @@ async def process_single_sequence(
                 seq['history'].append(append_text)
                 total_tokens += len(append_text.split())
                 continue
-
+            print("before search_intent-----")
             _, search_intent = await generate_response(
                 client=aux_client,
                 model_name=args.aux_model_name,
@@ -486,7 +500,8 @@ async def process_single_sequence(
                 prompt=get_search_intent_instruction(seq['output']),
                 semaphore=semaphore,
             )
-
+            print("after search_intent -----")
+            print(search_intent)
             # 执行搜索和后续操作（同原逻辑）
             if search_query in search_cache:
                 results = search_cache[search_query]
@@ -495,7 +510,9 @@ async def process_single_sequence(
                     if args.search_engine == "bing":
                         results = await bing_web_search_async(search_query, args.bing_subscription_key, args.bing_endpoint)
                     elif args.search_engine == "serper":
+                        print("inside serper search elif -----")
                         results = await google_serper_search_async(search_query, args.serper_api_key)
+                        print("inside serper search elif end -----")
                     else: # Should not happen
                         results = {}
                     search_cache[search_query] = results
@@ -687,7 +704,7 @@ async def main_async():
         args.seed = int(time.time())
     random.seed(args.seed)
     np.random.seed(args.seed)
-
+    print("INSIDE MAIN ASYNC")
     # Validate API keys based on selected search engine
     if args.search_engine == "bing" and not args.bing_subscription_key:
         print("Error: Bing search engine is selected, but --bing_subscription_key is not provided.")
@@ -698,12 +715,14 @@ async def main_async():
     elif args.search_engine not in ["bing", "serper"]: # Should be caught by choices, but good to have
         print(f"Error: Invalid search engine '{args.search_engine}'. Choose 'bing' or 'serper'.")
         return
-
+    if args.search_engine == "serper": 
+        print("serper selected INSIDE MAIN ASYNC")
     if args.jina_api_key == 'None':
         jina_api_key = None
 
     # Modified data loading section
     if args.single_question:
+        print("INSIDE single qs")
         # Create a single item in the same format as dataset items
         filtered_data = [{
             'Question': args.single_question,
@@ -751,10 +770,11 @@ async def main_async():
             json.dump(search_cache, f, ensure_ascii=False, indent=2)
         with open(url_cache_path, 'w', encoding='utf-8') as f:
             json.dump(url_cache, f, ensure_ascii=False, indent=2)
-
+    print("after  cache--")
     # Define output directory
     if 'qwq' in args.model_name.lower():
         model_short_name = 'qwq'
+        print("INSIDE model name selection"+model_short_name)
         if 'webthinker' in args.model_name.lower():
             model_short_name = f'webthinker{args.model_name.split("webthinker")[-1]}'
     elif 'deepseek' in args.model_name.lower():
@@ -789,7 +809,7 @@ async def main_async():
         api_key=args.aux_api_key,
         base_url=args.aux_api_base_url,
     )
-    
+    print("after  model name--")
     if not args.single_question:
         # Load and prepare data
         with open(data_path, 'r', encoding='utf-8') as json_file:
@@ -802,10 +822,20 @@ async def main_async():
 
     # Prepare sequences
     active_sequences = []
+    print("before  filtered_data--")
     for item in filtered_data:
+        print("item-- start")
+        print(item)
+        print("item-- end")
         question = item['Question']
         instruction = get_multiqa_search_o1_instruction(args.max_search_limit)
+        print("instruction-- start")
+        print(instruction)
+        print("instruction-- end")
         user_prompt = get_task_instruction_openqa(question)
+        print("user_prompt-- start")
+        print(user_prompt)
+        print("user_prompt-- end")
 
         prompt = instruction + user_prompt
         item['prompt'] = prompt
@@ -818,7 +848,8 @@ async def main_async():
             'search_count': 0,
             'executed_search_queries': set(),
         })
-
+    print("length of active_sequences--")
+    print(len(active_sequences))
     # Initialize batch output records
     batch_output_records = []
     start_time = time.time()
